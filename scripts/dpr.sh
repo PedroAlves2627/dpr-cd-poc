@@ -19,7 +19,8 @@
 #   DPR_COMPLETE_ENDPOINT ex: /api/2076683/dpr_poc/release/{id}/complete  (vazio = complete manual)
 #   DPR_START_TIMEOUT    segundos à espera do start (default 600)
 #   DPR_POLICY_TIMEOUT   segundos à espera de compliance (default 300)
-#   DPR_CHANGE_ENDPOINT  opcional: endpoint custom para ligar o CR à fase em vez de related_task
+#   DPR_CHANGE_ENDPOINT  endpoint custom que liga o CR à fase (vazio = API oficial related_task)
+#   DPR_CHANGE_PHASE     nome da fase onde ligar o CR (vazio = fase In Progress)
 #   CHG_ASSIGNMENT_GROUP sys_id do grupo do CR (opcional)
 #   CHG_APPROVAL_TIMEOUT segundos à espera da aprovação do CR (default 1800)
 #   DPR_PHASES           nomes das fases do template por ordem, ex: "Build,Test,Deploy"
@@ -218,7 +219,8 @@ cmd_change_attach() {
   local id=${1:?releaseId em falta} chg=${2:?changeId em falta}
   if [[ -n "${DPR_CHANGE_ENDPOINT:-}" ]]; then
     # Opcional: endpoint custom que liga o CR a uma fase (sn_dpr_model_release_phase_cr)
-    call POST "$SN_INSTANCE${DPR_CHANGE_ENDPOINT//\{id\}/$id}" "$(jq -n --arg c "$chg" '{changeId: $c}')" >/dev/null
+    call POST "$SN_INSTANCE${DPR_CHANGE_ENDPOINT//\{id\}/$id}" \
+      "$(jq -n --arg c "$chg" --arg p "${DPR_CHANGE_PHASE:-}" '{changeId: $c} + (if $p != "" then {phaseName: $p} else {} end)')" >/dev/null
     log "::notice::Change ligado à fase da release (endpoint custom)"
   else
     # Por omissão: API oficial do DPR — o CR fica no Release Scope da release.

@@ -12,7 +12,7 @@ GitHub Actions                        ServiceNow DPR
                   ── policies/status (poll) ► compliant?
                   ── complete_phase ────────► fase 2 arranca
 3. UAT (dummy)    ── POST sn_chg_rest/change/normal ► CR criado
-                  ── POST /release/{id}/related_task ► CR associado à release
+                  ── POST <change custom> ──► CR ligado à fase (sn_dpr_model_release_phase_cr)
                   ── (gate igual ao 2) ─────► fase 3 (PROD) arranca
 4. aprovação CR   ── GET change_request (poll) ► espera approval = approved
 5. deploy PROD    ── (igual ao 2) ──────────► última fase → Review
@@ -72,11 +72,12 @@ Cada gate escreve no log a fase atual antes e depois do `complete_phase`.
 
 ## Change request antes de PROD
 
-No fim do stage de UAT o pipeline cria um **normal change** (Change Management API) e associa-o
-à release com o endpoint oficial `POST /release/{id}/related_task` (o CR aparece no **Release Scope**).
+No fim do stage de UAT o pipeline cria um **normal change** (Change Management API) e liga-o à
+fase da release com o endpoint custom `/release/{id}/change` (tabela `sn_dpr_model_release_phase_cr`,
+a mesma do botão Add — o CR aparece em **Change requests**). O `related_task` oficial não serve:
+o DPR recusa `change_request` ("Error in validating the related task type").
 O job seguinte espera até `approval = approved` antes do deploy (falha se for rejeitado).
 
-Pré-requisito: a propriedade `sn_dpr_model.release_related_task_types` tem de incluir `change_request`.
 O utilizador de integração precisa de `itil` ou `change_manager`. Variables opcionais: `DPR_CHANGE_ENDPOINT`
 (endpoint custom para ligar à fase em vez de related_task),
 `CHG_ASSIGNMENT_GROUP`, `CHG_APPROVAL_TIMEOUT` (segundos, default 3300).
