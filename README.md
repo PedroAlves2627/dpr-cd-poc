@@ -11,10 +11,10 @@ GitHub Actions                        ServiceNow DPR
 2. build (dummy)  ── policies/run ──────────► policies da fase 1
                   ── policies/status (poll) ► compliant?
                   ── complete_phase ────────► fase 2 arranca
-3. test (dummy)   ── (igual ao 2) ──────────► fase 3 (PROD) arranca
-4. change-request ── POST sn_chg_rest/change/normal ► CR criado
-                  ── POST <change custom> ──► CR ligado à fase de PROD
-                  ── GET change_request (poll) ► espera approval = approved
+3. UAT (dummy)    ── POST sn_chg_rest/change/normal ► CR criado
+                  ── POST /release/{id}/related_task ► CR associado à release
+                  ── (gate igual ao 2) ─────► fase 3 (PROD) arranca
+4. aprovação CR   ── GET change_request (poll) ► espera approval = approved
 5. deploy PROD    ── (igual ao 2) ──────────► última fase → Review
                   ── POST <complete custom> ► Completed
 ```
@@ -72,9 +72,13 @@ Cada gate escreve no log a fase atual antes e depois do `complete_phase`.
 
 ## Change request antes de PROD
 
-O job `change-request` cria um **normal change** (Change Management API), liga-o à fase de PROD
-e fica à espera até `approval = approved` (falha se for rejeitado). O utilizador de integração
-precisa de `itil` ou `change_manager`. Variables opcionais: `DPR_CHANGE_ENDPOINT`,
+No fim do stage de UAT o pipeline cria um **normal change** (Change Management API) e associa-o
+à release com o endpoint oficial `POST /release/{id}/related_task` (o CR aparece no **Release Scope**).
+O job seguinte espera até `approval = approved` antes do deploy (falha se for rejeitado).
+
+Pré-requisito: a propriedade `sn_dpr_model.release_related_task_types` tem de incluir `change_request`.
+O utilizador de integração precisa de `itil` ou `change_manager`. Variables opcionais: `DPR_CHANGE_ENDPOINT`
+(endpoint custom para ligar à fase em vez de related_task),
 `CHG_ASSIGNMENT_GROUP`, `CHG_APPROVAL_TIMEOUT` (segundos, default 3300).
 
 Na PDI um normal change novo fica em *New* — para o POC, abre o CR, carrega em

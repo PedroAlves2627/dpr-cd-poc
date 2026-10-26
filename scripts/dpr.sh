@@ -8,7 +8,7 @@
 #   dpr.sh gate <releaseId> [fase]     -> corre policies, espera compliant e completa a fase atual
 #   dpr.sh complete <releaseId>        -> espera por Review e chama DPR_COMPLETE_ENDPOINT (-> Completed)
 #   dpr.sh change-create <releaseId> <versao>   -> cria um normal change (Change Mgmt API); imprime "sys_id number"
-#   dpr.sh change-attach <releaseId> <changeId> -> liga o CR à fase atual da release (DPR_CHANGE_ENDPOINT)
+#   dpr.sh change-attach <releaseId> <changeId> -> associa o CR à release (API oficial related_task)
 #   dpr.sh change-wait <changeId>               -> espera até o CR estar aprovado (falha se rejeitado)
 #   dpr.sh status <releaseId>          -> mostra o estado da release e das policies
 #
@@ -19,7 +19,7 @@
 #   DPR_COMPLETE_ENDPOINT ex: /api/2076683/dpr_poc/release/{id}/complete  (vazio = complete manual)
 #   DPR_START_TIMEOUT    segundos à espera do start (default 600)
 #   DPR_POLICY_TIMEOUT   segundos à espera de compliance (default 300)
-#   DPR_CHANGE_ENDPOINT  ex: /api/2076683/dpr_poc/release/{id}/change  (vazio = ligar o CR à mão)
+#   DPR_CHANGE_ENDPOINT  opcional: endpoint custom para ligar o CR à fase em vez de related_task
 #   CHG_ASSIGNMENT_GROUP sys_id do grupo do CR (opcional)
 #   CHG_APPROVAL_TIMEOUT segundos à espera da aprovação do CR (default 1800)
 #   DPR_PHASES           nomes das fases do template por ordem, ex: "Build,Test,Deploy"
@@ -216,12 +216,16 @@ cmd_change_create() {
 
 cmd_change_attach() {
   local id=${1:?releaseId em falta} chg=${2:?changeId em falta}
-  if [[ -z "${DPR_CHANGE_ENDPOINT:-}" ]]; then
-    log "::warning::DPR_CHANGE_ENDPOINT não definido — adiciona o CR à fase no DPR Workspace (Change requests > Add)."
-    return 0
+  if [[ -n "${DPR_CHANGE_ENDPOINT:-}" ]]; then
+    # Opcional: endpoint custom que liga o CR a uma fase (sn_dpr_model_release_phase_cr)
+    call POST "$SN_INSTANCE${DPR_CHANGE_ENDPOINT//\{id\}/$id}" "$(jq -n --arg c "$chg" '{changeId: $c}')" >/dev/null
+    log "::notice::Change ligado à fase da release (endpoint custom)"
+  else
+    # Por omissão: API oficial do DPR — o CR fica no Release Scope da release.
+    # Requer change_request em sn_dpr_model.release_related_task_types.
+    call POST "$DPR_API/release/$id/related_task" "$(jq -n --arg c "$chg" '{taskIds: [$c]}')" >/dev/null
+    log "::notice::Change associado à release (related_task)"
   fi
-  call POST "$SN_INSTANCE${DPR_CHANGE_ENDPOINT//\{id\}/$id}" "$(jq -n --arg c "$chg" '{changeId: $c}')" >/dev/null
-  log "::notice::Change ligado à release"
 }
 
 cmd_change_wait() {
