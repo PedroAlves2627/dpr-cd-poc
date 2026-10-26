@@ -6,12 +6,14 @@
 #   dpr.sh start <releaseId>           -> chama o endpoint custom de start (DPR_START_ENDPOINT)
 #   dpr.sh wait-started <releaseId>    -> espera até a release estar In Progress
 #   dpr.sh gate <releaseId> [fase]     -> corre policies, espera compliant e completa a fase atual
+#   dpr.sh complete <releaseId>        -> espera por Review e chama DPR_COMPLETE_ENDPOINT (-> Completed)
 #   dpr.sh status <releaseId>          -> mostra o estado da release e das policies
 #
 # Variáveis de ambiente:
 #   SN_INSTANCE, SN_USER, SN_PASS                       (obrigatórias)
 #   DPR_TEMPLATE_ID, DPR_PRODUCT_ID, DPR_RELEASE_OWNER  (para create)
 #   DPR_START_ENDPOINT   ex: /api/x_poc/dpr/release/{id}/start  (vazio = start manual)
+#   DPR_COMPLETE_ENDPOINT ex: /api/x_poc/dpr/release/{id}/complete  (vazio = complete manual)
 #   DPR_START_TIMEOUT    segundos à espera do start (default 600)
 #   DPR_POLICY_TIMEOUT   segundos à espera de compliance (default 300)
 #   DPR_PHASES           nomes das fases do template por ordem, ex: "Build,Test,Deploy"
@@ -152,6 +154,33 @@ cmd_gate() {
   log "Depois do complete_phase: release '$state', fase atual '$( [[ "$state" == "In Progress" ]] && current_phase "$id" )'"
 }
 
+cmd_complete() {
+  local id=${1:?releaseId em falta} timeout=${DPR_START_TIMEOUT:-600} waited=0 state
+  # Depois da última fase o DPR leva a release para Review (pode demorar uns segundos)
+  while :; do
+    state=$(release_state "$id")
+    log "Estado da release: $state"
+    [[ "$state" == "Completed" ]] && { log "::notice::Release já está Completed"; return 0; }
+    [[ "$state" == "Review" ]] && break
+    (( waited >= 60 )) && { log "::error::Release em '$state', esperava Review depois da última fase"; exit 1; }
+    sleep 5; waited=$((waited + 5))
+  done
+
+  if [[ -z "${DPR_COMPLETE_ENDPOINT:-}" ]]; then
+    log "::warning::DPR_COMPLETE_ENDPOINT não definido — carrega em 'Complete release' no DPR Workspace."
+  else
+    call POST "$SN_INSTANCE${DPR_COMPLETE_ENDPOINT//\{id\}/$id}" '{}' >/dev/null
+  fi
+
+  waited=0
+  while :; do
+    state=$(release_state "$id")
+    [[ "$state" == "Completed" ]] && { log "::notice::Release Completed"; return 0; }
+    (( waited >= timeout )) && { log "::error::Release não passou a Completed em ${timeout}s (está '$state')"; exit 1; }
+    sleep 10; waited=$((waited + 10))
+  done
+}
+
 cmd_status() {
   local id=${1:?releaseId em falta}
   echo "Estado: $(release_state "$id")"
@@ -188,6 +217,7 @@ case "${1:-}" in
   start)        shift; cmd_start "$@" ;;
   wait-started) shift; cmd_wait_started "$@" ;;
   gate)         shift; cmd_gate "$@" ;;
+  complete)     shift; cmd_complete "$@" ;;
   status)       shift; cmd_status "$@" ;;
-  *) sed -n '2,20p' "$0"; exit 1 ;;
+  *) sed -n '2,26p' "$0"; exit 1 ;;
 esac

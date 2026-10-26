@@ -12,7 +12,8 @@ GitHub Actions                        ServiceNow DPR
                   ── policies/status (poll) ► compliant?
                   ── complete_phase ────────► fase 2 arranca
 3. test (dummy)   ── (igual ao 2) ──────────► fase 3 arranca
-4. deploy (dummy) ── (igual ao 2) ──────────► última fase → Review/Completed
+4. deploy (dummy) ── (igual ao 2) ──────────► última fase → Review
+                  ── POST <complete custom> ► Completed
 ```
 
 ## Estrutura
@@ -21,8 +22,8 @@ GitHub Actions                        ServiceNow DPR
 |---|---|
 | `.github/workflows/cd-dpr-poc.yml` | Workflow com 4 jobs dummy; build, test e deploy completam uma fase cada |
 | `scripts/dpr.sh` | Helper com as chamadas à API de DPR (`create`, `start`, `wait-started`, `gate`, `status`) |
-| `servicenow/start-release-scripted-rest.js` | Scripted REST API para o passo Pending → In Progress |
-| `servicenow/discover-start-logic.js` | Background script para descobrir o que o botão "Start release" chama |
+| `servicenow/release-lifecycle-scripted-rest.js` | Scripted REST API com `/start` (Pending → In Progress) e `/complete` (Review → Completed) |
+| `servicenow/discover-start-logic.js` | Background script que lista os métodos de `sn_dpr.Release`, ações Start/Complete, estados e propriedades |
 
 ## Setup
 
@@ -30,18 +31,20 @@ GitHub Actions                        ServiceNow DPR
    - Utilizador de integração com `sn_dpr_model.product_manager` ou `sn_dpr_model.release_admin`
      (e leitura em `sn_dpr_model_release`, usada para confirmar o estado).
    - Template **stage-oriented** com 3 fases — build, test e deploy completam a fase 1, 2 e 3.
-   - Correr `discover-start-logic.js`, preencher `startViaDprLogic()` e criar a Scripted REST API.
+   - Criar a Scripted REST API com os 2 resources descritos no topo de `release-lifecycle-scripted-rest.js`
+     (mesmo script, muda só `ACTION`). Se responder 501, corre `discover-start-logic.js` e preenche `METHOD_OVERRIDE`.
 2. **GitHub** — repo novo com estes ficheiros e, em *Settings > Secrets and variables > Actions*:
    - Secrets: `SN_INSTANCE`, `SN_USER`, `SN_PASS`
-   - Variables: `DPR_TEMPLATE_ID`, `DPR_PRODUCT_ID`, `DPR_RELEASE_OWNER`, `DPR_START_ENDPOINT`
-     (ex: `/api/x_poc/dpr/release/{id}/start`) e, opcionalmente, `DPR_PHASE_BUILD` / `DPR_PHASE_TEST` / `DPR_PHASE_DEPLOY` (nomes das fases do template).
+   - Variables: `DPR_TEMPLATE_ID`, `DPR_PRODUCT_ID`, `DPR_RELEASE_OWNER`, `DPR_START_ENDPOINT`,
+     `DPR_COMPLETE_ENDPOINT` (ex: `/api/x_poc/dpr/release/{id}/start` e `.../complete`) e, opcionalmente, `DPR_PHASE_BUILD` / `DPR_PHASE_TEST` / `DPR_PHASE_DEPLOY` (nomes das fases do template).
 3. *Actions > CD + ServiceNow DPR (POC) > Run workflow*.
 
-## Sem o endpoint de start (para já)
+## Sem os endpoints custom (para já)
 
 Deixa `DPR_START_ENDPOINT` vazio. O job 1 cria a release, avisa e fica à espera
 (até 10 min) que ela passe a In Progress — carregas em **Start release** no DPR
-Workspace e o pipeline continua sozinho. Dá para validar tudo o resto da integração.
+Workspace e o pipeline continua sozinho. O mesmo para `DPR_COMPLETE_ENDPOINT` vazio: no fim
+o job de deploy espera que carregues em **Complete release**.
 
 ## Testar localmente
 
