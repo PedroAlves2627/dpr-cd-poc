@@ -9,7 +9,7 @@ name: CD + ServiceNow DPR (POC)
 #   SN_PASS
 #
 # Variables (Settings > Secrets and variables > Actions > Variables):
-#   DPR_TEMPLATE_ID, DPR_PRODUCT_ID, DPR_RELEASE_OWNER
+#   DPR_TEMPLATE_ID, DPR_PRODUCT_ID, DPR_RELEASE_OWNER  (opcional: já têm os sys_ids da PDI por omissão)
 #   DPR_START_ENDPOINT   ex: /api/x_poc/dpr/release/{id}/start  (vazio = start manual no Workspace)
 #   DPR_PHASE_BUILD, DPR_PHASE_TEST, DPR_PHASE_DEPLOY  (opcional: nome da fase 1, 2 e 3 do template)
 
@@ -38,9 +38,10 @@ jobs:
       - name: Criar release no DPR
         id: create
         env:
-          DPR_TEMPLATE_ID: ${{ vars.DPR_TEMPLATE_ID }}
-          DPR_PRODUCT_ID: ${{ vars.DPR_PRODUCT_ID }}
-          DPR_RELEASE_OWNER: ${{ vars.DPR_RELEASE_OWNER }}
+          # Valores por omissão = sys_ids da PDI; podem ser sobrepostos por repository variables
+          DPR_TEMPLATE_ID: ${{ vars.DPR_TEMPLATE_ID || '899d784493c49710ec56367f3bba10fb' }}
+          DPR_PRODUCT_ID: ${{ vars.DPR_PRODUCT_ID || 'e6a760ad93334714ec56367f3bba1022' }}
+          DPR_RELEASE_OWNER: ${{ vars.DPR_RELEASE_OWNER || 'f39ddda3936b83d0ec56367f3bba109a' }}
         run: |
           ID=$(bash scripts/dpr.sh create "POC ${{ inputs.version }} (run ${{ github.run_number }})" "${{ inputs.version }}")
           echo "releaseId=$ID" >> "$GITHUB_OUTPUT"
