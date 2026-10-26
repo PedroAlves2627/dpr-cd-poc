@@ -1,0 +1,101 @@
+name: CD + ServiceNow DPR (POC)
+
+# Pipeline dummy: cada job representa um stage de CD e, no fim, faz avançar
+# a fase correspondente da release no ServiceNow Digital Product Release.
+#
+# Secrets (Settings > Secrets and variables > Actions > Secrets):
+#   SN_INSTANCE   ex: https://dev437812.service-now.com
+#   SN_USER       utilizador de integração (product_manager ou release_admin)
+#   SN_PASS
+#
+# Variables (Settings > Secrets and variables > Actions > Variables):
+#   DPR_TEMPLATE_ID, DPR_PRODUCT_ID, DPR_RELEASE_OWNER
+#   DPR_START_ENDPOINT   ex: /api/x_poc/dpr/release/{id}/start  (vazio = start manual no Workspace)
+#   DPR_PHASE_BUILD, DPR_PHASE_TEST, DPR_PHASE_DEPLOY  (opcional: nome da fase 1, 2 e 3 do template)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão a lançar (ex: 2.4)"
+        required: true
+        default: "0.1.0"
+
+env:
+  SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
+  SN_USER: ${{ secrets.SN_USER }}
+  SN_PASS: ${{ secrets.SN_PASS }}
+
+jobs:
+  create-release:
+    name: 1. Criar e iniciar release
+    runs-on: ubuntu-latest
+    outputs:
+      releaseId: ${{ steps.create.outputs.releaseId }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Criar release no DPR
+        id: create
+        env:
+          DPR_TEMPLATE_ID: ${{ vars.DPR_TEMPLATE_ID }}
+          DPR_PRODUCT_ID: ${{ vars.DPR_PRODUCT_ID }}
+          DPR_RELEASE_OWNER: ${{ vars.DPR_RELEASE_OWNER }}
+        run: |
+          ID=$(bash scripts/dpr.sh create "POC ${{ inputs.version }} (run ${{ github.run_number }})" "${{ inputs.version }}")
+          echo "releaseId=$ID" >> "$GITHUB_OUTPUT"
+          echo "Release criada: \`$ID\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Iniciar release (Pending -> In Progress)
+        env:
+          DPR_START_ENDPOINT: ${{ vars.DPR_START_ENDPOINT }}
+        run: bash scripts/dpr.sh start "${{ steps.create.outputs.releaseId }}"
+
+      - name: Confirmar que está In Progress
+        run: bash scripts/dpr.sh wait-started "${{ steps.create.outputs.releaseId }}"
+
+  build:
+    name: 2. Build (dummy) + gate DPR
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dummy
+        run: |
+          echo "A compilar versão ${{ inputs.version }}..."
+          sleep 5
+          echo "Build OK"
+      - name: Gate DPR — completar fase 1
+        run: bash scripts/dpr.sh gate "${{ needs.create-release.outputs.releaseId }}" "${{ vars.DPR_PHASE_BUILD }}"
+
+  test:
+    name: 3. Testes (dummy) + gate DPR
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Testes dummy
+        run: |
+          echo "A correr testes..."
+          sleep 5
+          echo "42 testes, 0 falhas"
+      - name: Gate DPR — completar fase 2
+        run: bash scripts/dpr.sh gate "${{ needs.create-release.outputs.releaseId }}" "${{ vars.DPR_PHASE_TEST }}"
+
+  deploy:
+    name: 4. Deploy (dummy) + gate DPR
+    needs: [create-release, test]
+    runs-on: ubuntu-latest
+    environment: production   # opcional: ativa aprovação manual no GitHub
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy dummy
+        run: |
+          echo "A fazer deploy da ${{ inputs.version }}..."
+          sleep 5
+          echo "Deploy OK"
+      - name: Gate DPR — completar fase 3
+        run: bash scripts/dpr.sh gate "${{ needs.create-release.outputs.releaseId }}" "${{ vars.DPR_PHASE_DEPLOY }}"
+      - name: Estado final
+        if: always()
+        run: bash scripts/dpr.sh status "${{ needs.create-release.outputs.releaseId }}"

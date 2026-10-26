@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Helper para o POC CD -> ServiceNow Digital Product Release (DPR)
+#
+# Uso:
+#   dpr.sh create <nome> <versao>      -> cria a release (fica Pending) e imprime o releaseId
+#   dpr.sh start <releaseId>           -> chama o endpoint custom de start (DPR_START_ENDPOINT)
+#   dpr.sh wait-started <releaseId>    -> espera até a release estar In Progress
+#   dpr.sh gate <releaseId> [fase]     -> corre policies, espera compliant e completa a fase atual
+#   dpr.sh status <releaseId>          -> mostra o estado da release e das policies
+#
+# Variáveis de ambiente:
+#   SN_INSTANCE, SN_USER, SN_PASS                       (obrigatórias)
+#   DPR_TEMPLATE_ID, DPR_PRODUCT_ID, DPR_RELEASE_OWNER  (para create)
+#   DPR_START_ENDPOINT   ex: /api/x_poc/dpr/release/{id}/start  (vazio = start manual)
+#   DPR_START_TIMEOUT    segundos à espera do start (default 600)
+#   DPR_POLICY_TIMEOUT   segundos à espera de compliance (default 300)
+
+set -euo pipefail
+
+: "${SN_INSTANCE:?SN_INSTANCE em falta}"
+: "${SN_USER:?SN_USER em falta}"
+: "${SN_PASS:?SN_PASS em falta}"
+
+SN_INSTANCE="${SN_INSTANCE%/}"
+DPR_API="$SN_INSTANCE/api/sn_dpr/v1/digital_product_release"
+
+log() { echo "$*" >&2; }
+
+# call <METHOD> <URL> [JSON] -> imprime o body em stdout; falha em HTTP >= 400 ou result.error == true
+call() {
+  local method=$1 url=$2 data=${3:-} tmp code body
+  tmp=$(mktemp)
+  local args=(-sS -o "$tmp" -w '%{http_code}' -u "$SN_USER:$SN_PASS"
+              -H 'Accept: application/json' -X "$method" "$url")
+  if [[ -n "$data" ]]; then
+    args+=(-H 'Content-Type: application/json' -d "$data")
+  fi
+  code=$(curl "${args[@]}")
+  body=$(cat "$tmp"); rm -f "$tmp"
+  log "[$method ${url#"$SN_INSTANCE"}] HTTP $code"
+  log "$body"
+  if (( code >= 400 )) || [[ "$(jq -r '.result.error // false' <<<"$body" 2>/dev/null)" == "true" ]]; then
+    log "::error::Chamada ao ServiceNow falhou (HTTP $code)"
+    exit 1
+  fi
+  printf '%s' "$body"
+}
+
+release_state() {
+  call GET "$SN_INSTANCE/api/now/table/sn_dpr_model_release/$1?sysparm_fields=number,state&sysparm_display_value=true" \
+    | jq -r '.result.state'
+}
+
+cmd_create() {
+  local name=${1:?nome em falta} version=${2:?versao em falta}
+  : "${DPR_TEMPLATE_ID:?}" "${DPR_PRODUCT_ID:?}" "${DPR_RELEASE_OWNER:?}"
+  local payload body id
+  payload=$(jq -n \
+    --arg name "$name" --arg version "$version" \
+    --arg owner "$DPR_RELEASE_OWNER" --arg template "$DPR_TEMPLATE_ID" --arg product "$DPR_PRODUCT_ID" \
+    '{name: $name, releaseOwner: $owner, templateId: $template, productId: $product,
+      autoCreateVersionName: $version, releaseDescription: "Criada pelo pipeline CD (POC)",
+      isDraftRelease: false}')
+  body=$(call POST "$DPR_API/release" "$payload")
+  id=$(jq -r '.result.releaseId' <<<"$body")
+  [[ -n "$id" && "$id" != "null" ]] || { log "::error::Sem releaseId na resposta"; exit 1; }
+  echo "$id"
+}
+
+cmd_start() {
+  local id=${1:?releaseId em falta}
+  if [[ -z "${DPR_START_ENDPOINT:-}" ]]; then
+    log "::warning::DPR_START_ENDPOINT não definido — carrega em 'Start release' no DPR Workspace."
+    return 0
+  fi
+  call POST "$SN_INSTANCE${DPR_START_ENDPOINT//\{id\}/$id}" '{}' >/dev/null
+}
+
+cmd_wait_started() {
+  local id=${1:?releaseId em falta} timeout=${DPR_START_TIMEOUT:-600} waited=0 state
+  while :; do
+    state=$(release_state "$id")
+    log "Estado da release: $state"
+    [[ "$state" == "In Progress" ]] && return 0
+    (( waited >= timeout )) && { log "::error::Release não passou a In Progress em ${timeout}s"; exit 1; }
+    sleep 10; waited=$((waited + 10))
+  done
+}
+
+cmd_gate() {
+  local id=${1:?releaseId em falta} expected=${2:-} timeout=${DPR_POLICY_TIMEOUT:-300} waited=0 body compliant phase
+  call POST "$DPR_API/release/$id/policies/run" >/dev/null
+  while :; do
+    body=$(call GET "$DPR_API/releases/$id/policies/status")
+    compliant=$(jq -r '.result.overallSummary.compliant' <<<"$body")
+    phase=$(jq -r '.result.overallSummary.currentPhase' <<<"$body")
+    if [[ -n "$expected" && "$phase" != "$expected" ]]; then
+      log "::error::Fase atual é '$phase', esperava '$expected'"
+      exit 1
+    fi
+    [[ "$compliant" == "true" ]] && break
+    (( waited >= timeout )) && { log "::error::Policies da fase '$phase' não ficaram compliant em ${timeout}s"; exit 1; }
+    sleep 15; waited=$((waited + 15))
+  done
+  call POST "$DPR_API/release_id/$id/complete_phase" >/dev/null
+  log "::notice::Fase '$phase' completa"
+}
+
+cmd_status() {
+  local id=${1:?releaseId em falta}
+  echo "Estado: $(release_state "$id")"
+  call GET "$DPR_API/releases/$id/policies/status" | jq '.result.overallSummary' || true
+}
+
+case "${1:-}" in
+  create)       shift; cmd_create "$@" ;;
+  start)        shift; cmd_start "$@" ;;
+  wait-started) shift; cmd_wait_started "$@" ;;
+  gate)         shift; cmd_gate "$@" ;;
+  status)       shift; cmd_status "$@" ;;
+  *) sed -n '2,20p' "$0"; exit 1 ;;
+esac
