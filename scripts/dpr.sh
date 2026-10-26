@@ -7,6 +7,9 @@
 #   dpr.sh wait-started <releaseId>    -> espera até a release estar In Progress
 #   dpr.sh gate <releaseId> [fase]     -> corre policies, espera compliant e completa a fase atual
 #   dpr.sh complete <releaseId>        -> espera por Review e chama DPR_COMPLETE_ENDPOINT (-> Completed)
+#   dpr.sh change-create <releaseId> <versao>   -> cria um normal change (Change Mgmt API); imprime "sys_id number"
+#   dpr.sh change-attach <releaseId> <changeId> -> liga o CR à fase atual da release (DPR_CHANGE_ENDPOINT)
+#   dpr.sh change-wait <changeId>               -> espera até o CR estar aprovado (falha se rejeitado)
 #   dpr.sh status <releaseId>          -> mostra o estado da release e das policies
 #
 # Variáveis de ambiente:
@@ -16,6 +19,9 @@
 #   DPR_COMPLETE_ENDPOINT ex: /api/2076683/dpr_poc/release/{id}/complete  (vazio = complete manual)
 #   DPR_START_TIMEOUT    segundos à espera do start (default 600)
 #   DPR_POLICY_TIMEOUT   segundos à espera de compliance (default 300)
+#   DPR_CHANGE_ENDPOINT  ex: /api/2076683/dpr_poc/release/{id}/change  (vazio = ligar o CR à mão)
+#   CHG_ASSIGNMENT_GROUP sys_id do grupo do CR (opcional)
+#   CHG_APPROVAL_TIMEOUT segundos à espera da aprovação do CR (default 1800)
 #   DPR_PHASES           nomes das fases do template por ordem, ex: "Build,Test,Deploy"
 #                        (permite ao gate saltar uma fase que o DPR já completou sozinho)
 
@@ -187,6 +193,54 @@ cmd_status() {
   call GET "$DPR_API/releases/$id/policies/status" | jq '.result.overallSummary' || true
 }
 
+# ---------- Change Request ----------
+
+cmd_change_create() {
+  local id=${1:?releaseId em falta} version=${2:?versao em falta} payload body chg num
+  payload=$(jq -n --arg v "$version" --arg rel "$id" --arg run "${GITHUB_SERVER_URL:-}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-}" \
+    --arg grp "${CHG_ASSIGNMENT_GROUP:-}" \
+    '{short_description: ("Deploy para PROD da versão " + $v),
+      description: ("Change criado pelo pipeline CD.\nRelease DPR: " + $rel + "\nPipeline: " + $run),
+      justification: "Deploy automático via pipeline CD (POC)",
+      implementation_plan: "Deploy automático pelo pipeline após aprovação.",
+      backout_plan: "Re-deploy da versão anterior pelo pipeline.",
+      test_plan: "Testes automáticos do stage de testes do pipeline."}
+     + (if $grp != "" then {assignment_group: $grp} else {} end)')
+  body=$(call POST "$SN_INSTANCE/api/sn_chg_rest/change/normal" "$payload")
+  chg=$(jq -r '.result.sys_id.value // .result.sys_id // empty' <<<"$body")
+  num=$(jq -r '.result.number.value // .result.number // empty' <<<"$body")
+  [[ -n "$chg" ]] || { log "::error::Sem sys_id do change na resposta"; exit 1; }
+  log "::notice::Change $num criado ($chg)"
+  echo "$chg $num"
+}
+
+cmd_change_attach() {
+  local id=${1:?releaseId em falta} chg=${2:?changeId em falta}
+  if [[ -z "${DPR_CHANGE_ENDPOINT:-}" ]]; then
+    log "::warning::DPR_CHANGE_ENDPOINT não definido — adiciona o CR à fase no DPR Workspace (Change requests > Add)."
+    return 0
+  fi
+  call POST "$SN_INSTANCE${DPR_CHANGE_ENDPOINT//\{id\}/$id}" "$(jq -n --arg c "$chg" '{changeId: $c}')" >/dev/null
+  log "::notice::Change ligado à release"
+}
+
+cmd_change_wait() {
+  local chg=${1:?changeId em falta} timeout=${CHG_APPROVAL_TIMEOUT:-1800} waited=0 rec approval state num
+  while :; do
+    rec=$( ( call GET "$SN_INSTANCE/api/now/table/change_request/$chg?sysparm_fields=number,state,approval" ) 2>/dev/null )
+    approval=$(jq -r '.result.approval' <<<"$rec"); state=$(jq -r '.result.state' <<<"$rec"); num=$(jq -r '.result.number' <<<"$rec")
+    log "Change $num: approval=$approval state=$state"
+    case "$approval" in
+      approved) log "::notice::Change $num aprovado"; return 0 ;;
+      rejected) log "::error::Change $num rejeitado — deploy para PROD cancelado"; exit 1 ;;
+    esac
+    # state -4 = Cancelled / 4 = Canceled em algumas versões
+    [[ "$state" == "4" ]] && { log "::error::Change $num cancelado"; exit 1; }
+    (( waited >= timeout )) && { log "::error::Change $num não foi aprovado em ${timeout}s"; exit 1; }
+    sleep ${CHG_POLL:-30}; waited=$((waited + ${CHG_POLL:-30}))
+  done
+}
+
 # Diagnóstico de credenciais sem revelar valores
 cmd_check_auth() {
   local q="'\"" warn=0 code
@@ -218,6 +272,9 @@ case "${1:-}" in
   wait-started) shift; cmd_wait_started "$@" ;;
   gate)         shift; cmd_gate "$@" ;;
   complete)     shift; cmd_complete "$@" ;;
+  change-create) shift; cmd_change_create "$@" ;;
+  change-attach) shift; cmd_change_attach "$@" ;;
+  change-wait)   shift; cmd_change_wait "$@" ;;
   status)       shift; cmd_status "$@" ;;
-  *) sed -n '2,26p' "$0"; exit 1 ;;
+  *) sed -n '2,32p' "$0"; exit 1 ;;
 esac

@@ -11,8 +11,11 @@ GitHub Actions                        ServiceNow DPR
 2. build (dummy)  ── policies/run ──────────► policies da fase 1
                   ── policies/status (poll) ► compliant?
                   ── complete_phase ────────► fase 2 arranca
-3. test (dummy)   ── (igual ao 2) ──────────► fase 3 arranca
-4. deploy (dummy) ── (igual ao 2) ──────────► última fase → Review
+3. test (dummy)   ── (igual ao 2) ──────────► fase 3 (PROD) arranca
+4. change-request ── POST sn_chg_rest/change/normal ► CR criado
+                  ── POST <change custom> ──► CR ligado à fase de PROD
+                  ── GET change_request (poll) ► espera approval = approved
+5. deploy PROD    ── (igual ao 2) ──────────► última fase → Review
                   ── POST <complete custom> ► Completed
 ```
 
@@ -23,6 +26,7 @@ GitHub Actions                        ServiceNow DPR
 | `.github/workflows/cd-dpr-poc.yml` | Workflow com 4 jobs dummy; build, test e deploy completam uma fase cada |
 | `scripts/dpr.sh` | Helper com as chamadas à API de DPR (`create`, `start`, `wait-started`, `gate`, `status`) |
 | `servicenow/release-lifecycle-scripted-rest.js` | Scripted REST API com `/start` (Pending → In Progress) e `/complete` (Review → Completed) |
+| `servicenow/discover-change-link.js` | Background script que mostra como o DPR liga um CR a uma fase (tabela, campos, ação Add) |
 | `servicenow/discover-start-logic.js` | Background script que lista os métodos de `sn_dpr.Release`, ações Start/Complete, estados e propriedades |
 
 ## Setup
@@ -65,6 +69,16 @@ fechar a fase seguinte por engano. Para isso define:
 - `DPR_PHASE_BUILD`, `DPR_PHASE_TEST`, `DPR_PHASE_DEPLOY` — a fase que cada stage fecha
 
 Cada gate escreve no log a fase atual antes e depois do `complete_phase`.
+
+## Change request antes de PROD
+
+O job `change-request` cria um **normal change** (Change Management API), liga-o à fase de PROD
+e fica à espera até `approval = approved` (falha se for rejeitado). O utilizador de integração
+precisa de `itil` ou `change_manager`. Variables opcionais: `DPR_CHANGE_ENDPOINT`,
+`CHG_ASSIGNMENT_GROUP`, `CHG_APPROVAL_TIMEOUT` (segundos, default 3300).
+
+Na PDI um normal change novo fica em *New* — para o POC, abre o CR, carrega em
+**Request Approval** e aprova-o; o pipeline continua sozinho.
 
 ## Notas
 

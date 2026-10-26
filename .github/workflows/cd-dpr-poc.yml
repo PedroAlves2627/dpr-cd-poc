@@ -12,6 +12,9 @@ name: CD + ServiceNow DPR (POC)
 #   DPR_TEMPLATE_ID, DPR_PRODUCT_ID, DPR_RELEASE_OWNER  (opcional: já têm os sys_ids da PDI por omissão)
 #   DPR_START_ENDPOINT    opcional; por omissão /api/2076683/dpr_poc/release/{id}/start  ({id} = releaseId criado)
 #   DPR_COMPLETE_ENDPOINT opcional; por omissão /api/2076683/dpr_poc/release/{id}/complete
+#   DPR_CHANGE_ENDPOINT   ex: /api/2076683/dpr_poc/release/{id}/change  (vazio = ligar o CR à mão)
+#   CHG_ASSIGNMENT_GROUP  opcional; sys_id do assignment group do CR
+#   CHG_APPROVAL_TIMEOUT  opcional; segundos à espera da aprovação (default 3300)
 #   DPR_PHASES          nomes das 3 fases por ordem, ex: "Build,Test,Deploy"
 #   DPR_PHASE_BUILD, DPR_PHASE_TEST, DPR_PHASE_DEPLOY  (nome da fase que cada stage fecha)
 
@@ -89,15 +92,45 @@ jobs:
       - name: Gate DPR — completar fase 2
         run: bash scripts/dpr.sh gate "${{ needs.create-release.outputs.releaseId }}" "${{ vars.DPR_PHASE_TEST }}"
 
-  deploy:
-    name: 4. Deploy (dummy) + gate DPR
+  change-request:
+    name: 4. Change request para PROD
     needs: [create-release, test]
+    runs-on: ubuntu-latest
+    outputs:
+      changeId: ${{ steps.chg.outputs.changeId }}
+      changeNumber: ${{ steps.chg.outputs.changeNumber }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Criar change request (normal)
+        id: chg
+        env:
+          CHG_ASSIGNMENT_GROUP: ${{ vars.CHG_ASSIGNMENT_GROUP }}
+        run: |
+          OUT=$(bash scripts/dpr.sh change-create "${{ needs.create-release.outputs.releaseId }}" "${{ inputs.version }}")
+          read -r CHG NUM <<<"$OUT"
+          echo "changeId=$CHG" >> "$GITHUB_OUTPUT"
+          echo "changeNumber=$NUM" >> "$GITHUB_OUTPUT"
+          echo "Change request: **$NUM** (\`$CHG\`)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Ligar o CR à fase de PROD da release
+        env:
+          DPR_CHANGE_ENDPOINT: ${{ vars.DPR_CHANGE_ENDPOINT }}   # ex: /api/2076683/dpr_poc/release/{id}/change
+        run: bash scripts/dpr.sh change-attach "${{ needs.create-release.outputs.releaseId }}" "${{ steps.chg.outputs.changeId }}"
+      - name: Esperar aprovação do CR
+        timeout-minutes: 60
+        env:
+          CHG_APPROVAL_TIMEOUT: ${{ vars.CHG_APPROVAL_TIMEOUT || '3300' }}
+        run: bash scripts/dpr.sh change-wait "${{ steps.chg.outputs.changeId }}"
+
+  deploy:
+    name: 5. Deploy PROD (dummy) + gate DPR
+    needs: [create-release, change-request]
     runs-on: ubuntu-latest
     environment: production   # opcional: ativa aprovação manual no GitHub
     steps:
       - uses: actions/checkout@v4
       - name: Deploy dummy
         run: |
+          echo "CR aprovado: ${{ needs.change-request.outputs.changeNumber }}"
           echo "A fazer deploy da ${{ inputs.version }}..."
           sleep 5
           echo "Deploy OK"
