@@ -14,6 +14,8 @@
 #   DPR_START_ENDPOINT   ex: /api/x_poc/dpr/release/{id}/start  (vazio = start manual)
 #   DPR_START_TIMEOUT    segundos à espera do start (default 600)
 #   DPR_POLICY_TIMEOUT   segundos à espera de compliance (default 300)
+#   DPR_PHASES           nomes das fases do template por ordem, ex: "Build,Test,Deploy"
+#                        (permite ao gate saltar uma fase que o DPR já completou sozinho)
 
 set -euo pipefail
 
@@ -91,23 +93,63 @@ cmd_wait_started() {
   done
 }
 
+# Posição (1..n) de uma fase na lista DPR_PHASES ("Build,Test,Deploy"); 0 se não estiver
+phase_index() {
+  local name=$1 i=1 p
+  IFS=',' read -ra _phases <<<"${DPR_PHASES:-}"
+  for p in "${_phases[@]}"; do
+    [[ "$(trim "$p")" == "$name" ]] && { echo "$i"; return; }
+    i=$((i + 1))
+  done
+  echo 0
+}
+
+current_phase() {
+  ( call GET "$DPR_API/releases/$1/policies/status" ) 2>/dev/null | jq -r '.result.overallSummary.currentPhase // empty'
+}
+
 cmd_gate() {
-  local id=${1:?releaseId em falta} expected=${2:-} timeout=${DPR_POLICY_TIMEOUT:-300} waited=0 body compliant phase
+  local id=${1:?releaseId em falta} expected=${2:-} timeout=${DPR_POLICY_TIMEOUT:-300} waited=0
+  local body compliant phase state ie ic
+
+  # 1) A release ainda está ativa? Se o DPR já a fechou sozinho, não há nada para completar.
+  state=$(release_state "$id")
+  if [[ "$state" != "In Progress" ]]; then
+    if [[ "$state" == "Review" || "$state" == "Completed" ]]; then
+      log "::warning::Release já está em '$state' — esta fase foi completada automaticamente pelo DPR. Nada a fazer."
+      return 0
+    fi
+    log "::error::Release em '$state' (esperava In Progress)"; exit 1
+  fi
+
+  # 2) Em que fase estamos, e é a que este stage deve fechar?
+  phase=$(current_phase "$id")
+  log "Fase atual no DPR: '${phase:-?}'  |  fase deste stage: '${expected:-(não definida)}'"
+  if [[ -n "$expected" && -n "$phase" && "$phase" != "$expected" ]]; then
+    ie=$(phase_index "$expected"); ic=$(phase_index "$phase")
+    if (( ie > 0 && ic > 0 && ie < ic )); then
+      log "::warning::'$expected' já foi completada (DPR já está em '$phase'). A saltar este gate."
+      return 0
+    fi
+    log "::error::Fase atual é '$phase', esperava '$expected'"; exit 1
+  fi
+
+  # 3) Correr policies, esperar compliance e completar
   call POST "$DPR_API/release/$id/policies/run" >/dev/null
   while :; do
     body=$(call GET "$DPR_API/releases/$id/policies/status")
     compliant=$(jq -r '.result.overallSummary.compliant' <<<"$body")
-    phase=$(jq -r '.result.overallSummary.currentPhase' <<<"$body")
-    if [[ -n "$expected" && "$phase" != "$expected" ]]; then
-      log "::error::Fase atual é '$phase', esperava '$expected'"
-      exit 1
-    fi
     [[ "$compliant" == "true" ]] && break
     (( waited >= timeout )) && { log "::error::Policies da fase '$phase' não ficaram compliant em ${timeout}s"; exit 1; }
     sleep 15; waited=$((waited + 15))
   done
   call POST "$DPR_API/release_id/$id/complete_phase" >/dev/null
   log "::notice::Fase '$phase' completa"
+
+  # 4) Mostrar para onde o DPR avançou (ajuda a detetar transições automáticas)
+  sleep 3
+  state=$(release_state "$id")
+  log "Depois do complete_phase: release '$state', fase atual '$( [[ "$state" == "In Progress" ]] && current_phase "$id" )'"
 }
 
 cmd_status() {

@@ -11,7 +11,8 @@ name: CD + ServiceNow DPR (POC)
 # Variables (Settings > Secrets and variables > Actions > Variables):
 #   DPR_TEMPLATE_ID, DPR_PRODUCT_ID, DPR_RELEASE_OWNER  (opcional: já têm os sys_ids da PDI por omissão)
 #   DPR_START_ENDPOINT   ex: /api/x_poc/dpr/release/{id}/start  (vazio = start manual no Workspace)
-#   DPR_PHASE_BUILD, DPR_PHASE_TEST, DPR_PHASE_DEPLOY  (opcional: nome da fase 1, 2 e 3 do template)
+#   DPR_PHASES          nomes das 3 fases por ordem, ex: "Build,Test,Deploy"
+#   DPR_PHASE_BUILD, DPR_PHASE_TEST, DPR_PHASE_DEPLOY  (nome da fase que cada stage fecha)
 
 on:
   workflow_dispatch:
@@ -25,6 +26,7 @@ env:
   SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
   SN_USER: ${{ secrets.SN_USER }}
   SN_PASS: ${{ secrets.SN_PASS }}
+  DPR_PHASES: ${{ vars.DPR_PHASES }}
 
 jobs:
   create-release:

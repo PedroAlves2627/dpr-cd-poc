@@ -52,6 +52,17 @@ ID=$(bash scripts/dpr.sh create "POC local" 0.0.1)
 bash scripts/dpr.sh status "$ID"
 ```
 
+## Fases a avançar sozinhas
+
+Se o DPR completar uma fase sem o pipeline pedir (ex: fase sem tasks nem policies, ou a
+propriedade `sn_dpr.stage_workflow_auto_transition` ativa), o gate deteta-o e salta em vez de
+fechar a fase seguinte por engano. Para isso define:
+
+- `DPR_PHASES` — nomes das fases do template por ordem, ex: `Build,Test,Deploy`
+- `DPR_PHASE_BUILD`, `DPR_PHASE_TEST`, `DPR_PHASE_DEPLOY` — a fase que cada stage fecha
+
+Cada gate escreve no log a fase atual antes e depois do `complete_phase`.
+
 ## Notas
 
 - `complete_phase` só completa a fase se **todas** as policies estiverem compliant;
