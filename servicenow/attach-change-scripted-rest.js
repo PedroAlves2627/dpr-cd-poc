@@ -4,7 +4,7 @@
      * Liga um change request à fase da release (por omissão a fase In Progress),
      * como o botão "Add" da secção Change requests do DPR Workspace.
      *
-     * A tabela de ligação CR <-> fase é descoberta automaticamente no sys_dictionary.
+     * Tabela de ligação CR <-> fase: sn_dpr_model_release_phase_cr (campos detetados no sys_dictionary).
      * Testa primeiro com "dryRun": true para ver o que foi encontrado sem gravar nada.
      */
     var body = request.body && request.body.data ? request.body.data : {};
@@ -87,7 +87,13 @@
     }
 
     function findLinkTable() {
-        // candidatas: tabelas sn_dpr* com um campo que referencia a fase
+        // Tabela usada pelo DPR para ligar CRs a fases (confirmada na PDI)
+        var LINK_TABLE = 'sn_dpr_model_release_phase_cr';
+        var pf = findRefField(LINK_TABLE, [PHASE_TABLE]);
+        var cf = findRefField(LINK_TABLE, ['change_request']) || findRefField(LINK_TABLE, ['task']);
+        if (pf && cf) return { table: LINK_TABLE, phaseField: pf, changeField: cf };
+
+        // fallback: procurar outra tabela sn_dpr* com referência à fase e ao CR
         var d = new GlideRecord('sys_dictionary');
         d.addQuery('name', 'STARTSWITH', 'sn_dpr');
         d.addQuery('internal_type', 'reference');
