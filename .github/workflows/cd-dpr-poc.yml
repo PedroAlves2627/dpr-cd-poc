@@ -11,7 +11,7 @@ name: CD + ServiceNow DPR (POC)
 # Variables (Settings > Secrets and variables > Actions > Variables):
 #   DPR_TEMPLATE_ID, DPR_PRODUCT_ID, DPR_RELEASE_OWNER  (opcional: já têm os sys_ids da PDI por omissão)
 #   DPR_START_ENDPOINT    opcional; por omissão /api/2076683/dpr_poc/release/{id}/start  ({id} = releaseId criado)
-#   DPR_COMPLETE_ENDPOINT ex: /api/2076683/dpr_poc/release/{id}/complete  (vazio = complete manual no Workspace)
+#   DPR_COMPLETE_ENDPOINT opcional; por omissão /api/2076683/dpr_poc/release/{id}/complete
 #   DPR_PHASES          nomes das 3 fases por ordem, ex: "Build,Test,Deploy"
 #   DPR_PHASE_BUILD, DPR_PHASE_TEST, DPR_PHASE_DEPLOY  (nome da fase que cada stage fecha)
 
@@ -105,7 +105,7 @@ jobs:
         run: bash scripts/dpr.sh gate "${{ needs.create-release.outputs.releaseId }}" "${{ vars.DPR_PHASE_DEPLOY }}"
       - name: Completar release (Review -> Completed)
         env:
-          DPR_COMPLETE_ENDPOINT: ${{ vars.DPR_COMPLETE_ENDPOINT }}
+          DPR_COMPLETE_ENDPOINT: ${{ vars.DPR_COMPLETE_ENDPOINT || '/api/2076683/dpr_poc/release/{id}/complete' }}
         run: bash scripts/dpr.sh complete "${{ needs.create-release.outputs.releaseId }}"
       - name: Estado final
         if: always()

@@ -34,7 +34,7 @@
     var CONFIG = {
         // Igual à UI Action "Start release" (confirmado)
         start:    { fromStates: ['PENDING'], to: 'IN_PROGRESS' },
-        // TODO confirmar com o script da UI Action "Complete release"
+        // Igual à UI Action "Complete release" (confirmado)
         complete: { fromStates: ['REVIEW'], to: 'COMPLETED' }
     }[ACTION];
 
