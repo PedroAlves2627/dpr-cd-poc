@@ -21,10 +21,14 @@ set -euo pipefail
 : "${SN_USER:?SN_USER em falta}"
 : "${SN_PASS:?SN_PASS em falta}"
 
+log() { echo "$*" >&2; }
+
+# Limpa espaços/quebras de linha que costumam vir ao colar secrets
+trim() { local s=$1; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
+SN_INSTANCE=$(trim "$SN_INSTANCE"); SN_USER=$(trim "$SN_USER"); SN_PASS=$(trim "$SN_PASS")
+
 SN_INSTANCE="${SN_INSTANCE%/}"
 DPR_API="$SN_INSTANCE/api/sn_dpr/v1/digital_product_release"
-
-log() { echo "$*" >&2; }
 
 # call <METHOD> <URL> [JSON] -> imprime o body em stdout; falha em HTTP >= 400 ou result.error == true
 call() {
@@ -112,7 +116,32 @@ cmd_status() {
   call GET "$DPR_API/releases/$id/policies/status" | jq '.result.overallSummary' || true
 }
 
+# Diagnóstico de credenciais sem revelar valores
+cmd_check_auth() {
+  local q="'\"" warn=0 code
+  log "SN_INSTANCE = $SN_INSTANCE"
+  log "SN_USER     = ${#SN_USER} caracteres, começa por '${SN_USER:0:1}', acaba em '${SN_USER: -1}'"
+  log "SN_PASS     = ${#SN_PASS} caracteres"
+  for v in SN_USER SN_PASS; do
+    local val=${!v}
+    if [[ $q == *"${val:0:1}"* || $q == *"${val: -1}"* ]]; then
+      log "::warning::$v começa ou acaba com aspas — cola o valor sem aspas"; warn=1
+    fi
+  done
+  [[ "$SN_INSTANCE" == https://*.service-now.com ]] || log "::warning::SN_INSTANCE devia ser https://devXXXXX.service-now.com"
+  code=$(curl -sS -o /dev/null -w '%{http_code}' -u "$SN_USER:$SN_PASS" -H 'Accept: application/json' \
+         "$SN_INSTANCE/api/now/table/sys_user?sysparm_limit=1&sysparm_fields=sys_id")
+  log "Teste de autenticação (Table API sys_user): HTTP $code"
+  case $code in
+    200) log "::notice::Credenciais OK" ;;
+    401) log "::error::ServiceNow recusou as credenciais (401). Utilizador/password errados, 'Password needs reset' marcado, ou utilizador locked/inativo."; exit 1 ;;
+    403) log "::notice::Autenticado, mas sem acesso a sys_user (normal num utilizador só com roles DPR)" ;;
+    *)   log "::error::Resposta inesperada ($code) — a PDI pode estar a hibernar; acorda-a em developer.servicenow.com"; exit 1 ;;
+  esac
+}
+
 case "${1:-}" in
+  check-auth)   cmd_check_auth ;;
   create)       shift; cmd_create "$@" ;;
   start)        shift; cmd_start "$@" ;;
   wait-started) shift; cmd_wait_started "$@" ;;

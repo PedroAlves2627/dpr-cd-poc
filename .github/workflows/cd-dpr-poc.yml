@@ -35,6 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verificar credenciais do ServiceNow
+        run: bash scripts/dpr.sh check-auth
+
       - name: Criar release no DPR
         id: create
         env:
