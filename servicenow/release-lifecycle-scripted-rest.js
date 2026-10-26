@@ -21,7 +21,7 @@
  * sn_dpr_model.release_admin (ou product_manager) — o GlideRecord aqui não
  * aplica ACLs, por isso a proteção tem de estar no resource.
  *
- * URLs: /api/<namespace>/dpr/release/{id}/start  e  /api/<namespace>/dpr/release/{id}/complete
+ * URLs: /api/2076683/dpr_poc/release/{id}/start  e  /api/2076683/dpr_poc/release/{id}/complete
  *  O <namespace> NÃO é "global": em scope global é o company code da instância
  *  (propriedade glide.appcreator.company.code). Copia o valor do campo
  *  "Resource path" do resource depois de gravar.
