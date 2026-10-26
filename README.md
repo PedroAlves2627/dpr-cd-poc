@@ -36,7 +36,7 @@ GitHub Actions                        ServiceNow DPR
 2. **GitHub** — repo novo com estes ficheiros e, em *Settings > Secrets and variables > Actions*:
    - Secrets: `SN_INSTANCE`, `SN_USER`, `SN_PASS`
    - Variables: `DPR_TEMPLATE_ID`, `DPR_PRODUCT_ID`, `DPR_RELEASE_OWNER`, `DPR_START_ENDPOINT`,
-     `DPR_COMPLETE_ENDPOINT` (ex: `/api/x_poc/dpr/release/{id}/start` e `.../complete`) e, opcionalmente, `DPR_PHASE_BUILD` / `DPR_PHASE_TEST` / `DPR_PHASE_DEPLOY` (nomes das fases do template).
+     `DPR_COMPLETE_ENDPOINT` (ex: `/api/<namespace>/dpr/release/{id}/start` e `.../complete`) e, opcionalmente, `DPR_PHASE_BUILD` / `DPR_PHASE_TEST` / `DPR_PHASE_DEPLOY` (nomes das fases do template).
 3. *Actions > CD + ServiceNow DPR (POC) > Run workflow*.
 
 ## Sem os endpoints custom (para já)

@@ -21,7 +21,10 @@
  * sn_dpr_model.release_admin (ou product_manager) — o GlideRecord aqui não
  * aplica ACLs, por isso a proteção tem de estar no resource.
  *
- * URLs: /api/global/dpr/release/{id}/start  e  /api/global/dpr/release/{id}/complete
+ * URLs: /api/<namespace>/dpr/release/{id}/start  e  /api/<namespace>/dpr/release/{id}/complete
+ *  O <namespace> NÃO é "global": em scope global é o company code da instância
+ *  (propriedade glide.appcreator.company.code). Copia o valor do campo
+ *  "Resource path" do resource depois de gravar.
  *  -> no GitHub: DPR_START_ENDPOINT e DPR_COMPLETE_ENDPOINT
  */
 (function process(/*RESTAPIRequest*/ request, /*RESTAPIResponse*/ response) {

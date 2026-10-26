@@ -12,8 +12,8 @@
 # Variáveis de ambiente:
 #   SN_INSTANCE, SN_USER, SN_PASS                       (obrigatórias)
 #   DPR_TEMPLATE_ID, DPR_PRODUCT_ID, DPR_RELEASE_OWNER  (para create)
-#   DPR_START_ENDPOINT   ex: /api/x_poc/dpr/release/{id}/start  (vazio = start manual)
-#   DPR_COMPLETE_ENDPOINT ex: /api/x_poc/dpr/release/{id}/complete  (vazio = complete manual)
+#   DPR_START_ENDPOINT   ex: /api/<namespace>/dpr/release/{id}/start  (vazio = start manual)
+#   DPR_COMPLETE_ENDPOINT ex: /api/<namespace>/dpr/release/{id}/complete  (vazio = complete manual)
 #   DPR_START_TIMEOUT    segundos à espera do start (default 600)
 #   DPR_POLICY_TIMEOUT   segundos à espera de compliance (default 300)
 #   DPR_PHASES           nomes das fases do template por ordem, ex: "Build,Test,Deploy"
