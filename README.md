@@ -32,7 +32,7 @@ GitHub Actions                        ServiceNow DPR
      (e leitura em `sn_dpr_model_release`, usada para confirmar o estado).
    - Template **stage-oriented** com 3 fases — build, test e deploy completam a fase 1, 2 e 3.
    - Criar a Scripted REST API com os 2 resources descritos no topo de `release-lifecycle-scripted-rest.js`
-     (mesmo script, muda só `ACTION`). Se responder 501, corre `discover-start-logic.js` e preenche `METHOD_OVERRIDE`.
+     (mesmo script, muda só `ACTION`). Replica a UI Action: `state = RELEASE_STATES.IN_PROGRESS` + `update()`.
 2. **GitHub** — repo novo com estes ficheiros e, em *Settings > Secrets and variables > Actions*:
    - Secrets: `SN_INSTANCE`, `SN_USER`, `SN_PASS`
    - Variables: `DPR_TEMPLATE_ID`, `DPR_PRODUCT_ID`, `DPR_RELEASE_OWNER`, `DPR_START_ENDPOINT`,

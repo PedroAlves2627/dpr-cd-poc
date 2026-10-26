@@ -1,9 +1,14 @@
 /*
- * Scripted REST API — ações de ciclo de vida de uma release do DPR
- * que a API pública não expõe (botões "Start release" e "Complete release").
+ * Scripted REST API — botões "Start release" e "Complete release" do DPR,
+ * que a API pública não expõe.
+ *
+ * Replica a UI Action "Start release":
+ *     current.state = sn_dpr.ReleaseCommonConstants.RELEASE_STATES.IN_PROGRESS;
+ *     current.update();
+ * As business rules do DPR tratam do resto (iniciar a 1.ª fase, aprovações, tasks).
  *
  * Criar em: System Web Services > Scripted REST APIs > New
- *   Name: DPR POC          API ID: dpr        (scope à escolha, ex: x_poc)
+ *   Name: DPR POC          API ID: dpr        (scope: global)
  *
  * Resource 1                              Resource 2
  *   Name: Start release                     Name: Complete release
@@ -13,107 +18,89 @@
  *           ACTION = 'start'                        ACTION = 'complete'
  *
  * Em ambos: Requires authentication = true e uma ACL que exija
- * sn_dpr_model.release_admin (ou product_manager).
+ * sn_dpr_model.release_admin (ou product_manager) — o GlideRecord aqui não
+ * aplica ACLs, por isso a proteção tem de estar no resource.
  *
- * URLs: /api/<scope>/dpr/release/{id}/start  e  /api/<scope>/dpr/release/{id}/complete
+ * URLs: /api/global/dpr/release/{id}/start  e  /api/global/dpr/release/{id}/complete
  *  -> no GitHub: DPR_START_ENDPOINT e DPR_COMPLETE_ENDPOINT
- *
- * A lógica real é a da classe sn_dpr.Release (a mesma usada em createRelease).
- * Se o nome do método não for encontrado automaticamente, o erro devolve a lista
- * de métodos disponíveis — preenche METHOD_OVERRIDE com o nome certo.
  */
 (function process(/*RESTAPIRequest*/ request, /*RESTAPIResponse*/ response) {
 
-    var ACTION = 'start';           // 'start' ou 'complete' — muda no resource "Complete release"
-    var METHOD_OVERRIDE = '';       // ex: 'startRelease' — só se a deteção automática falhar
-    var PASS_GLIDERECORD = false;   // true se o método esperar um GlideRecord em vez do sys_id
+    var ACTION = 'start';   // 'start' ou 'complete' — muda no resource "Complete release"
 
     var CONFIG = {
-        start: {
-            candidates: ['startRelease', 'start', 'startReleaseById'],
-            from: ['Pending'],
-            to: ['In Progress']
-        },
-        complete: {
-            candidates: ['completeRelease', 'complete', 'markReleaseComplete', 'closeRelease'],
-            from: ['Review', 'In Progress'],
-            to: ['Completed']
-        }
+        // Igual à UI Action "Start release" (confirmado)
+        start:    { fromStates: ['PENDING'], to: 'IN_PROGRESS' },
+        // TODO confirmar com o script da UI Action "Complete release"
+        complete: { fromStates: ['REVIEW'], to: 'COMPLETED' }
     }[ACTION];
 
-    var releaseId = request.pathParams.id;
-    var rel = new GlideRecord('sn_dpr_model_release');
-    if (!rel.get(releaseId)) {
+    var STATES = releaseStates();
+
+    var current = new GlideRecord('sn_dpr_model_release');
+    if (!current.get(request.pathParams.id)) {
         response.setStatus(404);
-        return { error: true, message: 'Release não encontrada: ' + releaseId };
+        return { error: true, message: 'Release não encontrada: ' + request.pathParams.id };
     }
 
-    var before = rel.getDisplayValue('state');
+    var before = current.getValue('state');
+    var beforeLabel = current.getDisplayValue('state');
+    var target = STATES[CONFIG.to];
 
-    // Idempotente: se já está no estado final, não faz nada
-    if (CONFIG.to.indexOf(before) > -1) {
-        return { error: false, releaseId: releaseId, state: before, message: 'Já estava em ' + before };
+    if (!target) {
+        response.setStatus(500);
+        return { error: true, message: 'Estado ' + CONFIG.to + ' não encontrado em RELEASE_STATES', states: STATES };
     }
-    if (CONFIG.from.indexOf(before) == -1) {
+
+    // Idempotente
+    if (before == target) {
+        return { error: false, action: ACTION, state: beforeLabel, message: 'Já estava em ' + beforeLabel };
+    }
+
+    // Mesma condição que o botão: só a partir do estado certo
+    var allowed = CONFIG.fromStates.map(function (k) { return STATES[k]; });
+    if (allowed.indexOf(before) == -1) {
         response.setStatus(409);
         return {
-            error: true, releaseId: releaseId, state: before,
-            message: 'Não é possível fazer "' + ACTION + '" a partir de ' + before +
-                     ' (esperado: ' + CONFIG.from.join(' ou ') + ')'
+            error: true, action: ACTION, state: beforeLabel,
+            message: 'Não é possível fazer "' + ACTION + '" a partir de ' + beforeLabel
         };
     }
 
-    // Encontrar o método na classe do DPR
-    var api, available = [];
-    try {
-        api = new sn_dpr.Release();
-        for (var k in api) if (typeof api[k] == 'function') available.push(k);
-    } catch (e) {
+    // --- lógica da UI Action ---
+    current.state = target;
+    if (!current.update()) {
         response.setStatus(500);
-        return { error: true, message: 'sn_dpr.Release não acessível neste scope: ' + e };
+        return { error: true, action: ACTION, message: 'update() falhou: ' + current.getLastErrorMessage() };
     }
+    // ---------------------------
 
-    var method = METHOD_OVERRIDE;
-    if (!method) {
-        for (var i = 0; i < CONFIG.candidates.length; i++) {
-            if (typeof api[CONFIG.candidates[i]] == 'function') { method = CONFIG.candidates[i]; break; }
-        }
-    }
-    if (!method || typeof api[method] != 'function') {
-        response.setStatus(501);
-        return {
-            error: true,
-            message: 'Método para "' + ACTION + '" não encontrado em sn_dpr.Release. ' +
-                     'Preenche METHOD_OVERRIDE com um destes:',
-            availableMethods: available
-        };
-    }
-
-    // Executar
-    var result;
-    try {
-        result = api[method](PASS_GLIDERECORD ? rel : releaseId);
-    } catch (e) {
-        gs.error('[DPR POC] ' + method + '(' + releaseId + ') falhou: ' + e);
-        response.setStatus(500);
-        return { error: true, method: method, message: 'Falha em ' + method + ': ' + e };
-    }
-
-    // Confirmar que o estado mudou mesmo
-    rel.get(releaseId);
-    var after = rel.getDisplayValue('state');
-    var ok = CONFIG.to.indexOf(after) > -1;
+    current.get(request.pathParams.id);   // reler depois das business rules
+    var ok = current.getValue('state') == target;
     if (!ok) response.setStatus(500);
 
     return {
         error: !ok,
         action: ACTION,
-        method: method,
-        releaseId: releaseId,
-        previousState: before,
-        state: after,
-        dprResult: result === undefined ? null : JSON.stringify(result),
-        message: ok ? 'OK' : 'O método correu mas a release ficou em ' + after +
-                            '. Experimenta PASS_GLIDERECORD = true ou outro método.'
+        releaseId: current.getUniqueValue(),
+        previousState: beforeLabel,
+        state: current.getDisplayValue('state'),
+        message: ok ? 'OK' : 'Uma business rule repôs o estado — vê o System Log'
     };
+
+    // Constantes do DPR; se não forem acessíveis deste scope, lê os valores do sys_choice
+    function releaseStates() {
+        try {
+            var c = sn_dpr.ReleaseCommonConstants.RELEASE_STATES;
+            if (c && c.IN_PROGRESS) return c;
+        } catch (e) {
+            gs.warn('[DPR POC] ReleaseCommonConstants inacessível, a usar sys_choice: ' + e);
+        }
+        var map = {}, ch = new GlideRecord('sys_choice');
+        ch.addQuery('name', 'sn_dpr_model_release');
+        ch.addQuery('element', 'state');
+        ch.query();
+        while (ch.next()) map[ch.getValue('label').toUpperCase().replace(/\s+/g, '_')] = ch.getValue('value');
+        return map;
+    }
 })(request, response);
