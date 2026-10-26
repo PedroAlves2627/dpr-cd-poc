@@ -12,9 +12,9 @@ GitHub Actions                        ServiceNow DPR
                   ── policies/status (poll) ► compliant?
                   ── complete_phase ────────► fase 2 arranca
 3. UAT (dummy)    ── POST sn_chg_rest/change/normal ► CR criado
-                  ── POST <change custom> ──► CR ligado à fase (sn_dpr_model_release_phase_cr)
-                  ── (gate igual ao 2) ─────► fase 3 (PROD) arranca
-4. aprovação CR   ── GET change_request (poll) ► espera approval = approved
+                  ── POST <change custom> ──► CR ligado à fase UAT (sn_dpr_model_release_phase_cr)
+4. aprovação CR   ── GET change_request (poll) ► espera approval = approved (UAT continua aberta)
+                  ── (gate igual ao 2) ─────► UAT completa, fase 3 (PROD) arranca
 5. deploy PROD    ── (igual ao 2) ──────────► última fase → Review
                   ── POST <complete custom> ► Completed
 ```

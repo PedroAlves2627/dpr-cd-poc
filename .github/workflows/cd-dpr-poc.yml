@@ -80,7 +80,7 @@ jobs:
         run: bash scripts/dpr.sh gate "${{ needs.create-release.outputs.releaseId }}" "${{ vars.DPR_PHASE_BUILD }}"
 
   test:
-    name: 3. UAT (dummy) + change request + gate DPR
+    name: 3. UAT (dummy) + change request
     needs: [create-release, build]
     runs-on: ubuntu-latest
     outputs:
@@ -108,11 +108,9 @@ jobs:
           DPR_CHANGE_ENDPOINT: ${{ vars.DPR_CHANGE_ENDPOINT || '/api/2076683/dpr_poc/release/{id}/change' }}
           DPR_CHANGE_PHASE: ${{ vars.DPR_CHANGE_PHASE }}   # opcional: nome da fase onde ligar o CR (vazio = fase atual)
         run: bash scripts/dpr.sh change-attach "${{ needs.create-release.outputs.releaseId }}" "${{ steps.chg.outputs.changeId }}"
-      - name: Gate DPR — completar fase 2 (UAT)
-        run: bash scripts/dpr.sh gate "${{ needs.create-release.outputs.releaseId }}" "${{ vars.DPR_PHASE_TEST }}"
 
   change-approval:
-    name: 4. Aprovação do change request
+    name: 4. Aprovação do CR + fechar UAT
     needs: [create-release, test]
     runs-on: ubuntu-latest
     steps:
@@ -122,6 +120,9 @@ jobs:
         env:
           CHG_APPROVAL_TIMEOUT: ${{ vars.CHG_APPROVAL_TIMEOUT || '3300' }}
         run: bash scripts/dpr.sh change-wait "${{ needs.test.outputs.changeId }}"
+      # A fase de UAT só fecha (e PROD só arranca) depois de o CR estar aprovado
+      - name: Gate DPR — completar fase 2 (UAT -> PROD)
+        run: bash scripts/dpr.sh gate "${{ needs.create-release.outputs.releaseId }}" "${{ vars.DPR_PHASE_TEST }}"
 
   deploy:
     name: 5. Deploy PROD (dummy) + gate DPR
